@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
-	"github.com/Damnever/goqueue"
 	"io/ioutil"
 	"os"
 	"os/exec"
@@ -11,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Damnever/goqueue"
 )
 
 var Wg = &sync.WaitGroup{}
@@ -25,9 +26,12 @@ func bootstrap(host []string) (err error) {
 	chefEnv := host[2]
 	fqdn := strings.Join([]string{hostname, domain}, ".")
 	runlist := host[3]
-	cmd := strings.Join([]string{"knife bootstrap", fqdn, " -N ", hostname, " -E ", chefEnv, " #{sudo_value} --ssh-user #{ENV['SUPERUSER_NAME']} --ssh-password #{ENV['SUPERUSER_PW']} -r ", runlist}, "")
+	superuser_name := os.Getenv("SUPERUSER_NAME")
+	superuser_pw := os.Getenv("SUPERUSER_PW")
+	//sudo_value := os.Getenv("USE_SUDO")
+	cmd := strings.Join([]string{"knife bootstrap ", fqdn, " -N ", hostname, " -E ", chefEnv, " --sudo", " --ssh-user ", superuser_name, " --ssh-password ", superuser_pw, " -r ", runlist}, "")
 	fmt.Println("bootstrap command: ", cmd)
-	out, err := exec.Command("sh", "-c", cmd).Output()
+	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
 	if err != nil {
 		filename := strings.Join([]string{"./logs/", hostname, ".txt"}, "")
 		ioutil.WriteFile(filename, out, 0644)

@@ -2,8 +2,11 @@ package main
 
 import (
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
+	"log"
 	"os"
 	"os/exec"
 	"runtime"
@@ -20,20 +23,54 @@ var errored = goqueue.New(0)
 var complete = goqueue.New(0)
 var queue = goqueue.New(0)
 
-func bootstrap(host []string) (err error) {
-	hostname := host[0]
-	domain := host[1]
-	chefEnv := host[2]
-	fqdn := strings.Join([]string{hostname, domain}, ".")
-	runlist := host[3]
+type Host struct {
+	Hostname string `json:"hostname"`
+	Domain   string `json:"domain"`
+	ChefEnv  string `json:"chefenv"`
+	RunList  string `json:"runlist"`
+}
+
+func csv_to_hosts(csv_filename string) (hosts []Host) {
+	file, err := os.Open(csv_filename)
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	defer file.Close()
+	reader := csv.NewReader(file)
+	reader.Comma = '	'
+	// read all records into memory
+	for {
+		line, error := reader.Read()
+		if error == io.EOF {
+			break
+		} else if error != nil {
+			log.Fatal(error)
+		}
+		hosts = append(hosts, Host{
+			Hostname: line[0],
+			Domain:   line[1],
+			ChefEnv:  line[2],
+			RunList:  line[3]},
+		)
+	}
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+	return
+}
+
+func bootstrap(host Host) (err error) {
+	fqdn := strings.Join([]string{host.Hostname, host.Domain}, ".")
 	superuser_name := os.Getenv("SUPERUSER_NAME")
 	superuser_pw := os.Getenv("SUPERUSER_PW")
 	//sudo_value := os.Getenv("USE_SUDO")
-	cmd := strings.Join([]string{"knife bootstrap ", fqdn, " -N ", hostname, " -E ", chefEnv, " --sudo", " --ssh-user ", superuser_name, " --ssh-password ", superuser_pw, " -r ", runlist}, "")
+	cmd := strings.Join([]string{"knife bootstrap ", fqdn, " -N ", host.Hostname, " -E ", host.ChefEnv, " --sudo", " --ssh-user ", superuser_name, " --ssh-password ", superuser_pw, " -r ", host.RunList}, "")
 	fmt.Println("bootstrap command: ", cmd)
 	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
 	if err != nil {
-		filename := strings.Join([]string{"./logs/", hostname, ".txt"}, "")
+		filename := strings.Join([]string{"./logs/", host.Hostname, ".txt"}, "")
 		ioutil.WriteFile(filename, out, 0644)
 	}
 	return err
@@ -41,8 +78,9 @@ func bootstrap(host []string) (err error) {
 
 func worker(queue *goqueue.Queue) {
 	for !queue.IsEmpty() {
+		//Get queue with 2 second timeout
 		val, err := queue.Get(2)
-		item := val.([]string)
+		item := val.(Host)
 		if err != nil {
 			fmt.Println("Unexpect Error: %v\n", err)
 		}
@@ -65,24 +103,14 @@ func main() {
 	//baddns := goqueue.New(0)
 
 	// Read in the csv and populate queue for workers
-	file, err := os.Open("./sample.tsv")
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
-	defer file.Close()
-	reader := csv.NewReader(file)
-	reader.Comma = '	'
-	// read all records into memory
-	result, err := reader.ReadAll()
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
+	// TODO: Parameterize file name
+	var hosts []Host
+	hosts = csv_to_hosts("./sample.tsv")
 	// Queue all records
-	for i := range result {
-		record := result[i]
-		fmt.Println("Queueing:", record)
+	for i := range hosts {
+		record := hosts[i]
+		recordJson, _ := json.Marshal(record)
+		fmt.Println("Queueing:", string(recordJson))
 		queue.PutNoWait(record)
 	}
 	// Start worker pool

@@ -63,12 +63,7 @@ func csv_to_hosts(csv_filename string) (hosts []Host) {
 }
 
 func bootstrap(host Host) (err error) {
-	fqdn := strings.Join([]string{host.Hostname, host.Domain}, ".")
-	superuser_name := os.Getenv("SUPERUSER_NAME")
-	superuser_pw := os.Getenv("SUPERUSER_PW")
-	//sudo_value := os.Getenv("USE_SUDO")
-	cmd := strings.Join([]string{"knife bootstrap ", fqdn, " -N ", host.Hostname, " -E ", host.ChefEnv, " --sudo", " --ssh-user ", superuser_name, " --ssh-password ", superuser_pw, " -r ", host.RunList}, "")
-	fmt.Println("bootstrap command: ", cmd)
+	cmd := generate_command(host)
 	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
 	if err != nil {
 		filename := strings.Join([]string{"./logs/", host.Hostname, ".txt"}, "")
@@ -76,14 +71,21 @@ func bootstrap(host Host) (err error) {
 	}
 	return err
 }
-
+func generate_command(host Host) (cmd string) {
+	fqdn := strings.Join([]string{host.Hostname, host.Domain}, ".")
+	superuser_name := os.Getenv("SUPERUSER_NAME")
+	superuser_pw := os.Getenv("SUPERUSER_PW")
+	//sudo_value := os.Getenv("USE_SUDO")
+	cmd = strings.Join([]string{"knife bootstrap ", fqdn, " -N ", host.Hostname, " -E ", host.ChefEnv, " --sudo", " --ssh-user ", superuser_name, " --ssh-password ", superuser_pw, " -r ", host.RunList}, "")
+	return
+}
 func worker(queue *goqueue.Queue) {
 	for !queue.IsEmpty() {
 		//Get queue with 2 second timeout
 		val, err := queue.Get(2)
 		item := val.(Host)
 		if err != nil {
-			fmt.Println("Unexpect Error: %v\n", err)
+			fmt.Println("Unexpect Error: \n", err)
 		}
 		bootstrap(item)
 		fmt.Println("finished bootstrapping")
@@ -106,6 +108,7 @@ func main() {
 	// Read in the csv and populate queue for workers
 	var hosts []Host
 	var csv_filename string
+
 	flag.StringVar(&csv_filename, "file", "./sample.tsv", "file containing hosts to be bootstrapped")
 	flag.Parse()
 	hosts = csv_to_hosts(csv_filename)

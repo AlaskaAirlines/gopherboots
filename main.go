@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/csv"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -103,9 +104,11 @@ func main() {
 	//baddns := goqueue.New(0)
 
 	// Read in the csv and populate queue for workers
-	// TODO: Parameterize file name
 	var hosts []Host
-	hosts = csv_to_hosts("./sample.tsv")
+	var csv_filename string
+	flag.StringVar(&csv_filename, "file", "./sample.tsv", "file containing hosts to be bootstrapped")
+	flag.Parse()
+	hosts = csv_to_hosts(csv_filename)
 	// Queue all records
 	for i := range hosts {
 		record := hosts[i]

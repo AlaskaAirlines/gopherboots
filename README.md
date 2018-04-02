@@ -44,7 +44,7 @@ go test
 ```
 
 ## Contribute
-We encourage and appreciate congtributions to this project form the Open Source community. In future updates we hope to include support for the following features:
+We encourage and appreciate contributions to this project form the Open Source community. In future updates we hope to include support for the following features:
 - Bootstrapping Windows hosts
 - Error reporting and follow-up queueing based on error group
 - Re-creating `knife bootstrap` command functionality in Golang using Chef API calls, reducing Ruby resource bottleneck

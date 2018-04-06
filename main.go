@@ -23,6 +23,15 @@ var maxConcurrency = runtime.NumCPU() * 2
 var errored = goqueue.New(0)
 var complete = goqueue.New(0)
 var queue = goqueue.New(0)
+var badDNS []Host
+var timeoutHosts []Host
+var authHosts []Host
+
+type Report struct {
+	DNS_Hosts     []Host `json:"dns_hosts"`
+	Auth_Hosts    []Host `json:"auth_hosts"`
+	Timeout_Hosts []Host `json:"timeout_hosts"`
+}
 
 type Host struct {
 	Hostname string `json:"hostname"`
@@ -81,16 +90,49 @@ func csv_to_hosts(csv_filename string) (hosts []Host) {
 	return
 }
 
-func bootstrap(host Host) (err error) {
+func handle_bootstrap_error(out []byte, host Host) (bootstrap_success bool) {
+	o := string(out)
+	if strings.Contains(o, "Authentication failed") {
+		authHosts = append(authHosts, host)
+		return false
+	}
+	if strings.Contains(o, "ConnectionTimeout") {
+		timeoutHosts = append(timeoutHosts, host)
+		return false
+	}
+	if strings.Contains(o, "nodename nor servname provided") {
+		badDNS = append(badDNS, host)
+		return false
+	}
+	return true
+}
+
+func bootstrap(host Host) {
 	cmd := generate_command(host)
 	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
 	filename := strings.Join([]string{"./logs/", host.Hostname, ".txt"}, "")
 	ioutil.WriteFile(filename, out, 0644)
+	handle_bootstrap_error(out, host)
 	if err != nil {
 		fmt.Println("Error:", err)
 	}
-	return err
+	return
 }
+
+func error_report() (report Report) {
+
+	for i := range badDNS {
+		report.DNS_Hosts = append(report.DNS_Hosts, badDNS[i])
+	}
+	for i := range authHosts {
+		report.Auth_Hosts = append(report.Auth_Hosts, authHosts[i])
+	}
+	for i := range timeoutHosts {
+		report.Timeout_Hosts = append(report.Timeout_Hosts, timeoutHosts[i])
+	}
+	return report
+}
+
 func generate_command(host Host) (cmd string) {
 	fqdn := strings.Join([]string{host.Hostname, host.Domain}, ".")
 	superuser_name := os.Getenv("SUPERUSER_NAME")
@@ -120,10 +162,6 @@ func worker(queue *goqueue.Queue) {
 
 func main() {
 	os.Mkdir("./logs", 0777)
-	//in_progress := goqueue.New(0)
-	//badauth := goqueue.New(0)
-	//timeout := goqueue.New(0)
-	//baddns := goqueue.New(0)
 
 	// Read in the csv and populate queue for workers
 	var hosts []Host
@@ -147,4 +185,9 @@ func main() {
 		time.Sleep(50 * time.Millisecond)
 	}
 	Wg.Wait()
+	if len(badDNS) > 0 || len(timeoutHosts) > 0 || len(authHosts) > 0 {
+		report := error_report()
+		r, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Print("Error Report:", r)
+	}
 }

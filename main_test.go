@@ -11,7 +11,8 @@ func TestGenerateCommand(t *testing.T) {
 		RunList:  "testrecipe",
 	}
 	result := generate_command(test_host)
-	if result != "knife bootstrap testhost.testdomain -N testhost -E testenv --sudo --ssh-user testuser1 --ssh-password testuser1 -r testrecipe" {
-		t.Error("Expected knife bootstrap testhost.testdomain -N testhost -E testenv --sudo --ssh-user testuser1 --ssh-password testuser1 -r testrecipe, got ", result)
+	// TODO: not currently testing the env variables for ssh user/pw, needs to be mocked.
+	if result != "knife bootstrap testhost.testdomain -N testhost -E testenv --sudo --ssh-user  --ssh-password  -r testrecipe" {
+		t.Error("Expected knife bootstrap testhost.testdomain -N testhost -E testenv --sudo --ssh-user  --ssh-password  -r testrecipe, got ", result)
 	}
 }

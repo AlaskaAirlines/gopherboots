@@ -31,6 +31,24 @@ type Host struct {
 	RunList  string `json:"runlist"`
 }
 
+func host_validate(hosts []Host) {
+	for _, element := range hosts {
+		if element.Hostname == " " {
+			log.Fatal("Please ensure the following entry contains a hostname:", element)
+		}
+		if element.Domain == " " {
+			log.Fatal("Please ensure the following entry contains a domain:", element)
+		}
+		if element.ChefEnv == " " {
+			log.Fatal("Please ensure the following entry contains a chef environment:", element)
+		}
+		if element.RunList == " " {
+			log.Fatal("Please ensure the following entry contains a run list:", element)
+		}
+	}
+	return
+}
+
 func csv_to_hosts(csv_filename string) (hosts []Host) {
 	file, err := os.Open(csv_filename)
 	if err != nil {
@@ -59,15 +77,17 @@ func csv_to_hosts(csv_filename string) (hosts []Host) {
 		fmt.Println("Error:", err)
 		return
 	}
+	host_validate(hosts)
 	return
 }
 
 func bootstrap(host Host) (err error) {
 	cmd := generate_command(host)
 	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
+	filename := strings.Join([]string{"./logs/", host.Hostname, ".txt"}, "")
+	ioutil.WriteFile(filename, out, 0644)
 	if err != nil {
-		filename := strings.Join([]string{"./logs/", host.Hostname, ".txt"}, "")
-		ioutil.WriteFile(filename, out, 0644)
+		fmt.Println("Error:", err)
 	}
 	return err
 }

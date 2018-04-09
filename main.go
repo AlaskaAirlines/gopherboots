@@ -28,12 +28,15 @@ var queue = goqueue.New(0)
 var badDNS []Host
 var timeoutHosts []Host
 var authHosts []Host
-var generalError []Host
+var generalHosts []Host
+var knifeHosts []Host
 
 type Report struct {
 	DNS_Hosts     []Host `json:"dns_hosts"`
 	Auth_Hosts    []Host `json:"auth_hosts"`
 	Timeout_Hosts []Host `json:"timeout_hosts"`
+	General_Hosts []Host `json:"general_hosts"`
+	Knife_Hosts   []Host `json:"knife_hosts"`
 }
 
 type Host struct {
@@ -107,8 +110,13 @@ func handle_bootstrap_error(out []byte, host Host, exit_code int) (bootstrap_suc
 		badDNS = append(badDNS, host)
 		return false
 	}
-	if exit_code != 0 {
-		generalError = append(generalError, host)
+	if exit_code == 1 {
+		generalHosts = append(generalHosts, host)
+		return false
+	}
+	if exit_code == 100 {
+		knifeHosts = append(knifeHosts, host)
+		return false
 	}
 	return true
 }
@@ -162,6 +170,12 @@ func error_report() (report Report) {
 	}
 	for i := range timeoutHosts {
 		report.Timeout_Hosts = append(report.Timeout_Hosts, timeoutHosts[i])
+	}
+	for i := range generalHosts {
+		report.General_Hosts = append(report.General_Hosts, generalHosts[i])
+	}
+	for i := range knifeHosts {
+		report.Knife_Hosts = append(report.Knife_Hosts, knifeHosts[i])
 	}
 	return report
 }
@@ -217,7 +231,7 @@ func main() {
 		time.Sleep(50 * time.Millisecond)
 	}
 	Wg.Wait()
-	if len(badDNS) > 0 || len(timeoutHosts) > 0 || len(authHosts) > 0 {
+	if len(knifeHosts) > 0 || len(generalHosts) > 0 || len(badDNS) > 0 || len(timeoutHosts) > 0 || len(authHosts) > 0 {
 		report := error_report()
 		r, _ := json.MarshalIndent(report, "", "  ")
 		fmt.Println("Error Report:")

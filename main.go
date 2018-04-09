@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Damnever/goqueue"
@@ -23,12 +25,43 @@ var maxConcurrency = runtime.NumCPU() * 2
 var errored = goqueue.New(0)
 var complete = goqueue.New(0)
 var queue = goqueue.New(0)
+var badDNS []Host
+var timeoutHosts []Host
+var authHosts []Host
+var generalHosts []Host
+var knifeHosts []Host
+
+type Report struct {
+	DNS_Hosts     []Host `json:"dns_hosts"`
+	Auth_Hosts    []Host `json:"auth_hosts"`
+	Timeout_Hosts []Host `json:"timeout_hosts"`
+	General_Hosts []Host `json:"general_hosts"`
+	Knife_Hosts   []Host `json:"knife_hosts"`
+}
 
 type Host struct {
 	Hostname string `json:"hostname"`
 	Domain   string `json:"domain"`
 	ChefEnv  string `json:"chefenv"`
 	RunList  string `json:"runlist"`
+}
+
+func host_validate(hosts []Host) {
+	for _, element := range hosts {
+		if element.Hostname == " " {
+			log.Fatal("Please ensure the following entry contains a hostname:", element)
+		}
+		if element.Domain == " " {
+			log.Fatal("Please ensure the following entry contains a domain:", element)
+		}
+		if element.ChefEnv == " " {
+			log.Fatal("Please ensure the following entry contains a chef environment:", element)
+		}
+		if element.RunList == " " {
+			log.Fatal("Please ensure the following entry contains a run list:", element)
+		}
+	}
+	return
 }
 
 func csv_to_hosts(csv_filename string) (hosts []Host) {
@@ -59,18 +92,94 @@ func csv_to_hosts(csv_filename string) (hosts []Host) {
 		fmt.Println("Error:", err)
 		return
 	}
+	host_validate(hosts)
 	return
 }
 
-func bootstrap(host Host) (err error) {
-	cmd := generate_command(host)
-	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
-	if err != nil {
-		filename := strings.Join([]string{"./logs/", host.Hostname, ".txt"}, "")
-		ioutil.WriteFile(filename, out, 0644)
+func handle_bootstrap_error(out []byte, host Host, exit_code int) (bootstrap_success bool) {
+	o := string(out)
+	if strings.Contains(o, "Authentication failed") {
+		authHosts = append(authHosts, host)
+		return false
 	}
-	return err
+	if strings.Contains(o, "ConnectionTimeout") {
+		timeoutHosts = append(timeoutHosts, host)
+		return false
+	}
+	if strings.Contains(o, "nodename nor servname provided") {
+		badDNS = append(badDNS, host)
+		return false
+	}
+	if exit_code == 1 {
+		generalHosts = append(generalHosts, host)
+		return false
+	}
+	if exit_code == 100 {
+		knifeHosts = append(knifeHosts, host)
+		return false
+	}
+	return true
 }
+
+func run_command(cmd string) (out []byte, exit_code int) {
+	c := exec.Command("sh", "-c", cmd)
+	cmdOutput := &bytes.Buffer{}
+	cmdErrorOutput := &bytes.Buffer{}
+	c.Stdout = cmdOutput
+	c.Stderr = cmdErrorOutput
+	if err := c.Start(); err != nil {
+		log.Fatalf("cmd.Start: %v", err)
+	}
+	if err := c.Wait(); err != nil {
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			// The program has exited with an exit code != 0
+
+			// This works on both Unix and Windows. Although package
+			// syscall is generally platform dependent, WaitStatus is
+			// defined for both Unix and Windows and in both cases has
+			// an ExitStatus() method with the same signature.
+			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+				exit_code = status.ExitStatus()
+			}
+		} else {
+			log.Fatalf("cmd.Wait: %v", err)
+		}
+	}
+	var output_array []byte
+	output_array = append(output_array, cmdErrorOutput.Bytes()...)
+	output_array = append(output_array, cmdOutput.Bytes()...)
+	return output_array, exit_code
+}
+
+func bootstrap(host Host) {
+	cmd := generate_command(host)
+	cmd_out, exit_code := run_command(cmd)
+	filename := strings.Join([]string{"./logs/", host.Hostname, ".txt"}, "")
+	ioutil.WriteFile(filename, cmd_out, 0644)
+	handle_bootstrap_error(cmd_out, host, exit_code)
+	return
+}
+
+func error_report() (report Report) {
+
+	for i := range badDNS {
+		report.DNS_Hosts = append(report.DNS_Hosts, badDNS[i])
+	}
+	for i := range authHosts {
+		report.Auth_Hosts = append(report.Auth_Hosts, authHosts[i])
+	}
+	for i := range timeoutHosts {
+		report.Timeout_Hosts = append(report.Timeout_Hosts, timeoutHosts[i])
+	}
+	for i := range generalHosts {
+		report.General_Hosts = append(report.General_Hosts, generalHosts[i])
+	}
+	for i := range knifeHosts {
+		report.Knife_Hosts = append(report.Knife_Hosts, knifeHosts[i])
+	}
+	return report
+}
+
 func generate_command(host Host) (cmd string) {
 	fqdn := strings.Join([]string{host.Hostname, host.Domain}, ".")
 	superuser_name := os.Getenv("SUPERUSER_NAME")
@@ -88,7 +197,6 @@ func worker(queue *goqueue.Queue) {
 			fmt.Println("Unexpect Error: \n", err)
 		}
 		bootstrap(item)
-		fmt.Println("finished bootstrapping")
 		if err != nil {
 			errored.PutNoWait(val)
 		} else {
@@ -100,10 +208,6 @@ func worker(queue *goqueue.Queue) {
 
 func main() {
 	os.Mkdir("./logs", 0777)
-	//in_progress := goqueue.New(0)
-	//badauth := goqueue.New(0)
-	//timeout := goqueue.New(0)
-	//baddns := goqueue.New(0)
 
 	// Read in the csv and populate queue for workers
 	var hosts []Host
@@ -127,4 +231,10 @@ func main() {
 		time.Sleep(50 * time.Millisecond)
 	}
 	Wg.Wait()
+	if len(knifeHosts) > 0 || len(generalHosts) > 0 || len(badDNS) > 0 || len(timeoutHosts) > 0 || len(authHosts) > 0 {
+		report := error_report()
+		r, _ := json.MarshalIndent(report, "", "  ")
+		fmt.Println("Error Report:")
+		fmt.Printf("%s/n", r)
+	}
 }

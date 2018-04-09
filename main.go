@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/csv"
 	"encoding/json"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Damnever/goqueue"
@@ -26,6 +28,7 @@ var queue = goqueue.New(0)
 var badDNS []Host
 var timeoutHosts []Host
 var authHosts []Host
+var generalError []Host
 
 type Report struct {
 	DNS_Hosts     []Host `json:"dns_hosts"`
@@ -90,7 +93,7 @@ func csv_to_hosts(csv_filename string) (hosts []Host) {
 	return
 }
 
-func handle_bootstrap_error(out []byte, host Host) (bootstrap_success bool) {
+func handle_bootstrap_error(out []byte, host Host, exit_code int) (bootstrap_success bool) {
 	o := string(out)
 	if strings.Contains(o, "Authentication failed") {
 		authHosts = append(authHosts, host)
@@ -104,18 +107,48 @@ func handle_bootstrap_error(out []byte, host Host) (bootstrap_success bool) {
 		badDNS = append(badDNS, host)
 		return false
 	}
+	if exit_code != 0 {
+		generalError = append(generalError, host)
+	}
 	return true
+}
+
+func run_command(cmd string) (out []byte, exit_code int) {
+	c := exec.Command("sh", "-c", cmd)
+	cmdOutput := &bytes.Buffer{}
+	cmdErrorOutput := &bytes.Buffer{}
+	c.Stdout = cmdOutput
+	c.Stderr = cmdErrorOutput
+	if err := c.Start(); err != nil {
+		log.Fatalf("cmd.Start: %v", err)
+	}
+	if err := c.Wait(); err != nil {
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			// The program has exited with an exit code != 0
+
+			// This works on both Unix and Windows. Although package
+			// syscall is generally platform dependent, WaitStatus is
+			// defined for both Unix and Windows and in both cases has
+			// an ExitStatus() method with the same signature.
+			if status, ok := exiterr.Sys().(syscall.WaitStatus); ok {
+				exit_code = status.ExitStatus()
+			}
+		} else {
+			log.Fatalf("cmd.Wait: %v", err)
+		}
+	}
+	var output_array []byte
+	output_array = append(output_array, cmdErrorOutput.Bytes()...)
+	output_array = append(output_array, cmdOutput.Bytes()...)
+	return output_array, exit_code
 }
 
 func bootstrap(host Host) {
 	cmd := generate_command(host)
-	out, err := exec.Command("sh", "-c", cmd).CombinedOutput()
+	cmd_out, exit_code := run_command(cmd)
 	filename := strings.Join([]string{"./logs/", host.Hostname, ".txt"}, "")
-	ioutil.WriteFile(filename, out, 0644)
-	handle_bootstrap_error(out, host)
-	if err != nil {
-		fmt.Println("Error:", err)
-	}
+	ioutil.WriteFile(filename, cmd_out, 0644)
+	handle_bootstrap_error(cmd_out, host, exit_code)
 	return
 }
 
@@ -150,7 +183,6 @@ func worker(queue *goqueue.Queue) {
 			fmt.Println("Unexpect Error: \n", err)
 		}
 		bootstrap(item)
-		fmt.Println("finished bootstrapping")
 		if err != nil {
 			errored.PutNoWait(val)
 		} else {
@@ -188,6 +220,7 @@ func main() {
 	if len(badDNS) > 0 || len(timeoutHosts) > 0 || len(authHosts) > 0 {
 		report := error_report()
 		r, _ := json.MarshalIndent(report, "", "  ")
-		fmt.Print("Error Report:", r)
+		fmt.Println("Error Report:")
+		fmt.Printf("%s/n", r)
 	}
 }

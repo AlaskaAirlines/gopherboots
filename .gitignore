@@ -1,3 +1,4 @@
 logs/*.txt
 gopherboots
 test.tsv
+*.DS_STORE

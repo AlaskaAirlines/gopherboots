@@ -1,6 +1,6 @@
 # gopherboots
 [![Build Status](https://travis-ci.org/AlaskaAirlines/gopherboots.svg?branch=master)](https://travis-ci.org/AlaskaAirlines/gopherboots)
-![alt text](https://github.com/AlaskaAirlines/gopherboots/assets/gopherboots_logo03.png "GopherBoots")
+![alt text](/assets/gopherboots_logo03.png "GopherBoots")
 ## Introduction 
 This application was created to allow an administrator to bootstrap multiple hosts simultaneously. This functionality is not offered natively in Chef and places an unnecessary bottleneck on bootstrapping operations. Our ultimate aim is to remove as many barriers as possible from this process, enabling effective parallel bootstrapping at an enterprise level.
 
